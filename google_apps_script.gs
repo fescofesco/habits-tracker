@@ -1,4 +1,4 @@
-const SPREADSHEET_ID = 'PASTE_YOUR_GOOGLE_SHEET_ID_HERE';
+const SPREADSHEET_ID = '1wm2F_TyIyqgwMdyK1z63AqZDnAhXlGZUeYkMEBD5iQo';
 
 function doPost(e) {
   const payload = JSON.parse(e.postData.contents || '{}');
@@ -13,15 +13,22 @@ function saveDay(payload) {
     'timestamp','date','reading','eat_before_19','up_before_8','phone_off_22','pushups_10',
     'stranger_conversation','got_her_number','call_close_one','birthday_message_sent','birthday_called_instead',
     'cleaned_kitchen','cleaned_table','cleaned_floor',
-    'stranger_comment','birthday_comment'
+    'stranger_comment','birthday_comment','housework','stretching','walking','journaling','courage','courage_comment',
+    'board_game','board_game_comment','sports','sports_comment',
+    'contact_oma','contact_mama','contact_ambi','no_porn','shaved','lights_off_2245'
   ]);
   const h = payload.habits || {};
   sheet.appendRow([
-    new Date(), payload.date || '', h.reading || false, h.eat_before_19 || false, h.up_before_8 || false,
-    h.phone_off_22 || false, h.pushups_10 || false, h.stranger_conversation || false, h.got_her_number || false,
+    new Date(), payload.date || '', h.reading || 0, h.eat_before_19 || false, h.up_before_8 || false,
+    h.phone_off_22 || false, h.pushups_10 || 0, h.stranger_conversation || 0, h.got_her_number || 0,
     h.call_close_one || false, h.birthday_message_sent || false, h.birthday_called_instead || false,
     h.cleaned_kitchen || false, h.cleaned_table || false, h.cleaned_floor || false,
-    payload.stranger_comment || '', payload.birthday_comment || ''
+    payload.stranger_comment || '', payload.birthday_comment || '',
+    h.housework || 0, h.stretching || 0, h.walking || 0, h.journaling || false, h.courage || false,
+    payload.courage_comment || '', h.board_game || false, payload.board_game_comment || '',
+    h.sports || false, payload.sports_comment || '',
+    h.contact_oma || false, h.contact_mama || false, h.contact_ambi || false,
+    h.no_porn || false, h.shaved || false, h.lights_off_2245 || false
   ]);
   return { ok: true };
 }
@@ -50,6 +57,8 @@ function getOrCreateSheet_(ss, name, headers) {
   if (!sh) {
     sh = ss.insertSheet(name);
     sh.appendRow(headers);
+  } else if (sh.getLastColumn() < headers.length) {
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
   }
   return sh;
 }

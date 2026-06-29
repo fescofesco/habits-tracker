@@ -3,18 +3,46 @@ package com.felixscope.streaktracker;
 import android.app.*;
 import android.content.*;
 import android.os.Build;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.List;
+import java.util.Random;
 
 public class ReminderReceiver extends BroadcastReceiver {
     private static final String CHANNEL_ID = "streak_reminders";
 
     @Override public void onReceive(Context context, Intent intent) {
-        showNotification(context, "Don't miss your streak 🔥", "Open Streak Tracker and finish today's checkboxes.");
+        showDueNotification(context);
+        scheduleAll(context);
+    }
+
+    private static void showDueNotification(Context context) {
         SharedPreferences p = context.getSharedPreferences("streaks", Context.MODE_PRIVATE);
-        String time = p.getString("reminder_time", "21:30");
-        int h = 21, m = 30;
-        try { String[] parts = time.split(":"); h = Integer.parseInt(parts[0]); m = Integer.parseInt(parts[1]); } catch (Exception ignored) {}
-        scheduleDaily(context, h, m);
+        long now = System.currentTimeMillis();
+        List<String> overdue = new ArrayList<>();
+        addIfOverdue(p, overdue, "contact_oma", "Oma", 14, now);
+        addIfOverdue(p, overdue, "contact_mama", "Mama", 14, now);
+        addIfOverdue(p, overdue, "contact_ambi", "Ambi", 14, now);
+        addIfOverdue(p, overdue, "shaved", "shaving", 3, now);
+
+        if (!overdue.isEmpty()) {
+            showNotification(context, "A check-in is due", "Time for: " + android.text.TextUtils.join(", ", overdue) + ".");
+            return;
+        }
+
+        String[] messages = {
+                "A small action today keeps the streak alive.",
+                "Check in with your habits—one tap at a time.",
+                "Reading, moving, tidying, or connecting: pick one now.",
+                "Open Habits Tracker and give today a little momentum."
+        };
+        showNotification(context, "Habits check-in", messages[new Random().nextInt(messages.length)]);
+    }
+
+    private static void addIfOverdue(SharedPreferences p, List<String> overdue, String key, String label, int days, long now) {
+        long lastDone = p.getLong("last_done:" + key, 0);
+        long maximumAge = days * 24L * 60L * 60L * 1000L;
+        if (lastDone == 0 || now - lastDone >= maximumAge) overdue.add(label);
     }
 
     public static void ensureChannel(Context c) {
@@ -34,12 +62,18 @@ public class ReminderReceiver extends BroadcastReceiver {
         ((NotificationManager)c.getSystemService(Context.NOTIFICATION_SERVICE)).notify(2200, b.build());
     }
 
-    public static void scheduleDaily(Context c, int hour, int minute) {
+    public static void scheduleAll(Context c) {
+        scheduleDaily(c, 10, 0, 1000);
+        scheduleDaily(c, 17, 30, 1001);
+        scheduleDaily(c, 21, 0, 1002);
+    }
+
+    private static void scheduleDaily(Context c, int hour, int minute, int requestCode) {
         Calendar cal = Calendar.getInstance();
         cal.set(Calendar.HOUR_OF_DAY, hour); cal.set(Calendar.MINUTE, minute); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0);
         if (cal.getTimeInMillis() <= System.currentTimeMillis()) cal.add(Calendar.DAY_OF_MONTH, 1);
         Intent i = new Intent(c, ReminderReceiver.class);
-        PendingIntent pi = PendingIntent.getBroadcast(c, 0, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent pi = PendingIntent.getBroadcast(c, requestCode, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         AlarmManager am = (AlarmManager)c.getSystemService(Context.ALARM_SERVICE);
         if (Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) {
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.getTimeInMillis(), pi);

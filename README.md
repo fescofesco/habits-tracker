@@ -8,6 +8,8 @@ This is the native Android version of the streak app. It avoids PWA/browser back
 - Native Android notification reminder using `AlarmManager`
 - Voice comments via Android speech recognition
 - Local storage on the phone with `SharedPreferences`
+- Finished-book capture: photograph the cover, recognize its text on-device, and look up title/author through the non-Amazon Open Library API
+- Reading totals for finished books and known page counts, with the original cover photo kept locally
 - Optional Google Sheets sync through your existing Google Apps Script web app URL
 - Birthday check through Google Apps Script Calendar access
 
