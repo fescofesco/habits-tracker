@@ -46,7 +46,10 @@ public class MainActivity extends android.app.Activity {
             {"got_her_number", "Plus: got her number"},
             {"call_close_one", "Phone call to a close one"},
             {"birthday_message_sent", "Birthday message sent"},
-            {"birthday_called_instead", "Birthday: called instead"}
+            {"birthday_called_instead", "Birthday: called instead"},
+            {"cleaned_kitchen", "Cleaned kitchen"},
+            {"cleaned_table", "Cleaned table"},
+            {"cleaned_floor", "Cleaned floor"}
     };
 
     @Override public void onCreate(Bundle b) {

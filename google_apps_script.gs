@@ -12,6 +12,7 @@ function saveDay(payload) {
   const sheet = getOrCreateSheet_(ss, 'daily_log', [
     'timestamp','date','reading','eat_before_19','up_before_8','phone_off_22','pushups_10',
     'stranger_conversation','got_her_number','call_close_one','birthday_message_sent','birthday_called_instead',
+    'cleaned_kitchen','cleaned_table','cleaned_floor',
     'stranger_comment','birthday_comment'
   ]);
   const h = payload.habits || {};
@@ -19,6 +20,7 @@ function saveDay(payload) {
     new Date(), payload.date || '', h.reading || false, h.eat_before_19 || false, h.up_before_8 || false,
     h.phone_off_22 || false, h.pushups_10 || false, h.stranger_conversation || false, h.got_her_number || false,
     h.call_close_one || false, h.birthday_message_sent || false, h.birthday_called_instead || false,
+    h.cleaned_kitchen || false, h.cleaned_table || false, h.cleaned_floor || false,
     payload.stranger_comment || '', payload.birthday_comment || ''
   ]);
   return { ok: true };
