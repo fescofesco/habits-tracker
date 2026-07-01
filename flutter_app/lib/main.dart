@@ -151,6 +151,7 @@ class _TrackerPageState extends State<TrackerPage> {
       'board_game_comment',
       'sports_comment',
       'birthday_comment',
+      'uncle_exercise_comment',
     ]) {
       control(key).text = p.getString('$today:$key') ?? '';
     }
@@ -266,6 +267,7 @@ class _TrackerPageState extends State<TrackerPage> {
       'board_game_comment',
       'sports_comment',
       'birthday_comment',
+      'uncle_exercise_comment',
     ])
       key: control(key).text,
     'birthday_done': birthdayDone,
@@ -562,6 +564,8 @@ class _TrackerPageState extends State<TrackerPage> {
                         await _save();
                       },
                     ),
+                    if (e.key == 'uncle_exercise')
+                      _note('uncle_exercise_comment', 'What exercise did you do?', speechButton: true),
                     if (e.key == 'call_close_one')
                       _note('close_one_comment', 'Who did you call or meet?'),
                     if (e.key == 'courage')

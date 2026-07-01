@@ -16,7 +16,7 @@ function saveDay(payload) {
     'stranger_comment','birthday_comment','housework','stretching','walking','journaling','courage','courage_comment',
     'board_game','board_game_comment','sports','sports_comment',
     'contact_oma','contact_mama','contact_ambi','no_porn','shaved','lights_off_2245',
-    'close_one_comment','birthday_done','uncle_exercise','uncle_call_meet_loved_one'
+    'close_one_comment','birthday_done','uncle_exercise','uncle_call_meet_loved_one','uncle_exercise_comment'
   ]);
   const h = payload.habits || {};
   sheet.appendRow([
@@ -31,7 +31,8 @@ function saveDay(payload) {
     h.contact_oma || false, h.contact_mama || false, h.contact_ambi || false,
     h.no_porn || false, h.shaved || false, h.lights_off_2245 || false,
     payload.close_one_comment || '', payload.birthday_done || false,
-    h.uncle_exercise || false, h.uncle_call_meet_loved_one || false
+    h.uncle_exercise || false, h.uncle_call_meet_loved_one || false,
+    payload.uncle_exercise_comment || ''
   ]);
   return { ok: true };
 }
