@@ -19,6 +19,9 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: flutter_app
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -29,8 +32,10 @@ jobs:
         with:
           channel: stable
 
+      - name: Install dependencies
+        run: flutter pub get
+
       - name: Build Flutter web
-        working-directory: flutter_app
         run: flutter build web --base-href "/habits-tracker/"
 
       - uses: actions/configure-pages@v5
