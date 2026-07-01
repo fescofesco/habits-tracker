@@ -10,6 +10,8 @@ import android.provider.CallLog;
 import android.provider.ContactsContract;
 import android.provider.Telephony;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Locale;
 
 public final class CommunicationTracker {
@@ -69,7 +71,12 @@ public final class CommunicationTracker {
         else if (normalized.contains("ambi")) key = "contact_ambi";
         if (key == null) return;
         SharedPreferences prefs = context.getSharedPreferences("streaks", Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
         long previous = prefs.getLong("last_done:" + key, 0);
-        if (timestamp > previous) prefs.edit().putLong("last_done:" + key, timestamp).apply();
+        if (timestamp > previous) editor.putLong("last_done:" + key, timestamp);
+        String msgDay = new SimpleDateFormat("yyyy-MM-dd", Locale.GERMANY).format(new Date(timestamp));
+        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.GERMANY).format(new Date());
+        if (msgDay.equals(today)) editor.putBoolean(today + ":" + key, true);
+        editor.apply();
     }
 }

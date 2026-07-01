@@ -65,7 +65,7 @@ public class MainActivity extends android.app.Activity {
     private final String[][] habits = new String[][]{
             {"eat_before_19", "Eating before 19:00"},
             {"up_before_8", "Get up before 08:00"},
-            {"phone_off_22", "Shut off phone at 22:00"},
+            {"phone_off_22", "Shut off phone at 22:00", "Auto-tracked: checked automatically at 22:00 if your screen is off."},
             {"call_close_one", "Phone call to a close one / met a friend"},
             {"journaling", "Journaling"},
             {"courage", "Sich was trauen", "Etwas tun, das Mut kostet oder außerhalb deiner Komfortzone liegt."},
