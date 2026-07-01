@@ -30,7 +30,8 @@ jobs:
           channel: stable
 
       - name: Build Flutter web
-        run: cd flutter_app && flutter build web --base-href "/habits-tracker/"
+        working-directory: flutter_app
+        run: flutter build web --base-href "/habits-tracker/"
 
       - uses: actions/configure-pages@v5
 
