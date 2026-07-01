@@ -52,8 +52,10 @@ public class MainActivity extends android.app.Activity {
     private final Map<String, CheckBox> boxes = new LinkedHashMap<>();
     private final Map<String, Integer> counters = new LinkedHashMap<>();
     private final Map<String, TextView> counterViews = new LinkedHashMap<>();
-    private EditText strangerComment, courageComment, boardGameComment, sportsComment, birthdayComment, scriptUrl;
+    private EditText strangerComment, courageComment, boardGameComment, sportsComment, birthdayComment, closeOneComment, scriptUrl;
     private TextView status, streakSummary, birthdayBox;
+    private CheckBox birthdayCheckBox;
+    private LinearLayout birthdaySection;
     private TextView readingSummary;
     private ImageView latestBookPhoto;
     private File pendingBookPhoto;
@@ -64,9 +66,7 @@ public class MainActivity extends android.app.Activity {
             {"eat_before_19", "Eating before 19:00"},
             {"up_before_8", "Get up before 08:00"},
             {"phone_off_22", "Shut off phone at 22:00"},
-            {"call_close_one", "Phone call to a close one"},
-            {"birthday_message_sent", "Birthday message sent"},
-            {"birthday_called_instead", "Birthday: called instead"},
+            {"call_close_one", "Phone call to a close one / met a friend"},
             {"journaling", "Journaling"},
             {"courage", "Sich was trauen", "Etwas tun, das Mut kostet oder außerhalb deiner Komfortzone liegt."},
             {"board_game", "Play a board game"},
@@ -95,6 +95,7 @@ public class MainActivity extends android.app.Activity {
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
         prefs = getSharedPreferences("streaks", MODE_PRIVATE);
+        if (!prefs.contains("tracking_started_at")) prefs.edit().putLong("tracking_started_at", System.currentTimeMillis()).apply();
         seedHistoricalEntries();
         today = new SimpleDateFormat("yyyy-MM-dd", Locale.GERMANY).format(new Date());
         ReminderReceiver.ensureChannel(this);
@@ -103,6 +104,7 @@ public class MainActivity extends android.app.Activity {
         buildUi();
         loadState();
         updateSummary();
+        checkBirthdays();
     }
 
     private void seedHistoricalEntries() {
@@ -131,9 +133,18 @@ public class MainActivity extends android.app.Activity {
         list.addView(date);
 
         streakSummary = new TextView(this); streakSummary.setTextSize(16); streakSummary.setPadding(0, 18, 0, 18);
+        GradientDrawable statsBackground = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR, new int[]{Color.rgb(62, 39, 125), Color.rgb(255, 112, 67)});
+        statsBackground.setCornerRadius(28);
+        streakSummary.setBackground(statsBackground); streakSummary.setTextColor(Color.WHITE);
+        streakSummary.setTypeface(Typeface.DEFAULT_BOLD); streakSummary.setTextSize(20);
+        streakSummary.setGravity(Gravity.CENTER); streakSummary.setPadding(24, 24, 24, 24);
         list.addView(streakSummary);
 
-        for (String[] h : habits) addHabit(h[0], h[1], h.length > 2 ? h[2] : null);
+        for (String[] h : habits) {
+            addHabit(h[0], h[1], h.length > 2 ? h[2] : null);
+            if (h[0].equals("call_close_one")) closeOneComment = addCommentBox("Who did you call or meet?");
+        }
 
         addLabel("Repeatable habits");
         for (String[] h : repeatableHabits) addCounter(h[0], h[1]);
@@ -160,13 +171,20 @@ public class MainActivity extends android.app.Activity {
         addLabel("Sports description");
         sportsComment = addCommentBox("What sport or exercise did you do?");
 
-        addLabel("Birthday actions");
+        birthdaySection = new LinearLayout(this); birthdaySection.setOrientation(LinearLayout.VERTICAL);
+        TextView birthdayLabel = new TextView(this); birthdayLabel.setText("Birthday"); birthdayLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        birthdayLabel.setTextSize(18); birthdayLabel.setPadding(0, 24, 0, 4); birthdaySection.addView(birthdayLabel);
         birthdayBox = new TextView(this);
-        birthdayBox.setText("Tap 'Check birthdays' to load today's birthday events from Apps Script.");
-        birthdayBox.setPadding(0, 8, 0, 8); list.addView(birthdayBox);
-        addButton("🎂 Check birthdays today", v -> checkBirthdays());
-        birthdayComment = addCommentBox("Birthday note / what you sent...");
-        addButton("🎙 Speak birthday comment", v -> startSpeech(REQ_SPEECH_BIRTHDAY));
+        birthdayBox.setText("Checking today's birthdays…");
+        birthdayBox.setPadding(0, 8, 0, 8); birthdaySection.addView(birthdayBox);
+        birthdayCheckBox = new CheckBox(this); birthdayCheckBox.setText("Birthday greeting done"); birthdayCheckBox.setTextSize(20);
+        birthdayCheckBox.setOnCheckedChangeListener((button, checked) -> { if (!loadingState) { saveState(); updateSummary(); } });
+        birthdaySection.addView(birthdayCheckBox);
+        birthdayComment = new EditText(this); birthdayComment.setHint("Birthday note / what you sent..."); birthdayComment.setMinLines(2);
+        birthdaySection.addView(birthdayComment);
+        Button birthdaySpeech = new Button(this); birthdaySpeech.setText("🎙 Speak birthday comment"); birthdaySpeech.setAllCaps(false);
+        birthdaySpeech.setOnClickListener(v -> startSpeech(REQ_SPEECH_BIRTHDAY)); birthdaySection.addView(birthdaySpeech);
+        birthdaySection.setVisibility(View.GONE); list.addView(birthdaySection);
 
         addLabel("Sync + reminder settings");
         scriptUrl = addSingleLine("Google Apps Script Web App URL");
@@ -245,6 +263,8 @@ public class MainActivity extends android.app.Activity {
         courageComment.setText(prefs.getString(today + ":courage_comment", ""));
         boardGameComment.setText(prefs.getString(today + ":board_game_comment", ""));
         sportsComment.setText(prefs.getString(today + ":sports_comment", ""));
+        closeOneComment.setText(prefs.getString(today + ":close_one_comment", ""));
+        birthdayCheckBox.setChecked(prefs.getBoolean(today + ":birthday_done", false));
         birthdayComment.setText(prefs.getString(today + ":birthday_comment", ""));
         String savedScriptUrl = prefs.getString("script_url", DEFAULT_SCRIPT_URL);
         scriptUrl.setText(savedScriptUrl.trim().isEmpty() ? DEFAULT_SCRIPT_URL : savedScriptUrl);
@@ -275,6 +295,8 @@ public class MainActivity extends android.app.Activity {
         e.putString(today + ":courage_comment", courageComment.getText().toString());
         e.putString(today + ":board_game_comment", boardGameComment.getText().toString());
         e.putString(today + ":sports_comment", sportsComment.getText().toString());
+        e.putString(today + ":close_one_comment", closeOneComment.getText().toString());
+        e.putBoolean(today + ":birthday_done", birthdayCheckBox.isChecked());
         e.putString(today + ":birthday_comment", birthdayComment.getText().toString());
         e.putString("script_url", scriptUrl.getText().toString().trim());
         e.apply();
@@ -283,7 +305,39 @@ public class MainActivity extends android.app.Activity {
     private void updateSummary() {
         int done = 0; for (CheckBox cb : boxes.values()) if (cb.isChecked()) done++;
         for (int value : counters.values()) if (value > 0) done++;
-        streakSummary.setText(done + "/" + (boxes.size() + counters.size()) + " habits done today");
+        int[] streaks = calculateStreaks();
+        int total = boxes.size() + counters.size() + (birthdaySection.getVisibility() == View.VISIBLE ? 1 : 0);
+        if (birthdaySection.getVisibility() == View.VISIBLE && birthdayCheckBox.isChecked()) done++;
+        streakSummary.setText("🔥 " + streaks[0] + " day streak\n★ Best: " + streaks[1] + " days   ·   Today: " + done + "/" + total);
+    }
+
+    private int[] calculateStreaks() {
+        Set<String> activeDays = new HashSet<>();
+        for (Map.Entry<String, ?> entry : prefs.getAll().entrySet()) {
+            String key = entry.getKey();
+            if (!key.matches("\\d{4}-\\d{2}-\\d{2}:.+")) continue;
+            Object value = entry.getValue();
+            if ((value instanceof Boolean && (Boolean)value) || (value instanceof Integer && (Integer)value > 0))
+                activeDays.add(key.substring(0, 10));
+        }
+        Calendar day = Calendar.getInstance();
+        String todayKey = new SimpleDateFormat("yyyy-MM-dd", Locale.GERMANY).format(day.getTime());
+        if (!activeDays.contains(todayKey)) day.add(Calendar.DAY_OF_MONTH, -1);
+        int current = 0;
+        while (activeDays.contains(new SimpleDateFormat("yyyy-MM-dd", Locale.GERMANY).format(day.getTime()))) {
+            current++; day.add(Calendar.DAY_OF_MONTH, -1);
+        }
+        List<String> sorted = new ArrayList<>(activeDays); Collections.sort(sorted);
+        int best = 0, run = 0; String previous = null;
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd", Locale.GERMANY);
+        for (String value : sorted) {
+            try {
+                if (previous == null || (format.parse(value).getTime() - format.parse(previous).getTime()) / 86400000L == 1) run++;
+                else run = 1;
+                best = Math.max(best, run); previous = value;
+            } catch (Exception ignored) {}
+        }
+        return new int[]{current, best};
     }
 
     private void startSpeech(int requestCode) {
@@ -474,9 +528,15 @@ public class MainActivity extends android.app.Activity {
         if (url.isEmpty()) { toast("Paste your Apps Script URL first."); return; }
         new Thread(() -> {
             try {
-                String response = postJson(url, "{\"action\":\"getBirthdays\",\"date\":\"" + today + "\"}");
-                runOnUiThread(() -> birthdayBox.setText(response));
-            } catch (Exception ex) { runOnUiThread(() -> birthdayBox.setText("Birthday check failed: " + ex.getMessage())); }
+                JSONObject response = new JSONObject(postJson(url, "{\"action\":\"getBirthdays\",\"date\":\"" + today + "\"}"));
+                JSONArray birthdays = response.optJSONArray("birthdays");
+                runOnUiThread(() -> {
+                    boolean hasBirthday = birthdays != null && birthdays.length() > 0;
+                    birthdaySection.setVisibility(hasBirthday ? View.VISIBLE : View.GONE);
+                    if (hasBirthday) birthdayBox.setText("🎂 " + response.optString("message", "Birthday today"));
+                    updateSummary();
+                });
+            } catch (Exception ex) { runOnUiThread(() -> birthdaySection.setVisibility(View.GONE)); }
         }).start();
     }
 
@@ -490,6 +550,8 @@ public class MainActivity extends android.app.Activity {
         sb.append("\"courage_comment\":\"").append(esc(courageComment.getText().toString())).append("\",");
         sb.append("\"board_game_comment\":\"").append(esc(boardGameComment.getText().toString())).append("\",");
         sb.append("\"sports_comment\":\"").append(esc(sportsComment.getText().toString())).append("\",");
+        sb.append("\"close_one_comment\":\"").append(esc(closeOneComment.getText().toString())).append("\",");
+        sb.append("\"birthday_done\":").append(birthdayCheckBox.isChecked()).append(',');
         sb.append("\"birthday_comment\":\"").append(esc(birthdayComment.getText().toString())).append("\"}");
         return sb.toString();
     }

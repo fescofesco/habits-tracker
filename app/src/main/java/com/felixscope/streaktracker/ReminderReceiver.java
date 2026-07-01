@@ -20,13 +20,13 @@ public class ReminderReceiver extends BroadcastReceiver {
         SharedPreferences p = context.getSharedPreferences("streaks", Context.MODE_PRIVATE);
         long now = System.currentTimeMillis();
         List<String> overdue = new ArrayList<>();
-        addIfOverdue(p, overdue, "contact_oma", "Oma", 14, now);
-        addIfOverdue(p, overdue, "contact_mama", "Mama", 14, now);
-        addIfOverdue(p, overdue, "contact_ambi", "Ambi", 14, now);
-        addIfOverdue(p, overdue, "shaved", "shaving", 3, now);
+        addIfOverdue(p, overdue, "contact_oma", "Contact Oma", 14, now);
+        addIfOverdue(p, overdue, "contact_mama", "Contact Mama", 14, now);
+        addIfOverdue(p, overdue, "contact_ambi", "Contact Ambi", 14, now);
+        addIfOverdue(p, overdue, "shaved", "Shaving", 3, now);
 
         if (!overdue.isEmpty()) {
-            showNotification(context, "A check-in is due", "Time for: " + android.text.TextUtils.join(", ", overdue) + ".");
+            showNotification(context, "⚠ Once-every habits overdue", android.text.TextUtils.join(" · ", overdue));
             return;
         }
 
@@ -40,9 +40,10 @@ public class ReminderReceiver extends BroadcastReceiver {
     }
 
     private static void addIfOverdue(SharedPreferences p, List<String> overdue, String key, String label, int days, long now) {
-        long lastDone = p.getLong("last_done:" + key, 0);
+        long lastDone = p.getLong("last_done:" + key, p.getLong("tracking_started_at", now));
         long maximumAge = days * 24L * 60L * 60L * 1000L;
-        if (lastDone == 0 || now - lastDone >= maximumAge) overdue.add(label);
+        long missed = (now - lastDone) / maximumAge;
+        if (missed > 0) overdue.add(label + ": missed " + missed + (missed == 1 ? " time" : " times"));
     }
 
     public static void ensureChannel(Context c) {
