@@ -10,7 +10,7 @@ function doPost(e) {
 function saveDay(payload) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheet = getOrCreateSheet_(ss, 'daily_log', [
-    'timestamp','date','reading','eat_before_19','up_before_8','phone_off_22','pushups_10',
+    'timestamp','date','person','reading','eat_before_19','up_before_8','phone_off_22','pushups_10',
     'stranger_conversation','got_her_number','call_close_one','birthday_message_sent','birthday_called_instead',
     'cleaned_kitchen','cleaned_table','cleaned_floor',
     'stranger_comment','birthday_comment','housework','stretching','walking','journaling','courage','courage_comment',
@@ -20,7 +20,7 @@ function saveDay(payload) {
   ]);
   const h = payload.habits || {};
   sheet.appendRow([
-    new Date(), payload.date || '', h.reading || 0, h.eat_before_19 || false, h.up_before_8 || false,
+    new Date(), payload.date || '', payload.person || '', h.reading || 0, h.eat_before_19 || false, h.up_before_8 || false,
     h.phone_off_22 || false, h.pushups_10 || 0, h.stranger_conversation || 0, h.got_her_number || 0,
     h.call_close_one || false, h.birthday_message_sent || false, h.birthday_called_instead || false,
     h.cleaned_kitchen || false, h.cleaned_table || false, h.cleaned_floor || false,

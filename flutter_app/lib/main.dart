@@ -259,6 +259,7 @@ class _TrackerPageState extends State<TrackerPage> {
   Map<String, dynamic> _dailyJson() => {
     'action': 'saveDay',
     'date': today,
+    'person': appMode == 'uncle' ? 'Uncle' : 'Felix',
     'habits': {...checks, ...counts},
     for (final key in [
       'close_one_comment',

@@ -542,7 +542,7 @@ public class MainActivity extends android.app.Activity {
 
     private String dailyJson(String action) {
         StringBuilder sb = new StringBuilder();
-        sb.append("{\"action\":\"").append(action).append("\",\"date\":\"").append(today).append("\",");
+        sb.append("{\"action\":\"").append(action).append("\",\"date\":\"").append(today).append("\",\"person\":\"Felix\",");
         sb.append("\"habits\":{"); int i = 0;
         for (String[] h : habits) { if (i++ > 0) sb.append(','); sb.append('\"').append(h[0]).append("\":").append(boxes.get(h[0]).isChecked()); }
         for (String[] h : repeatableHabits) { if (i++ > 0) sb.append(','); sb.append('\"').append(h[0]).append("\":").append(counters.get(h[0])); }
