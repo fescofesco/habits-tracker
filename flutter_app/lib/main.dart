@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
@@ -231,7 +232,8 @@ class _TrackerPageState extends State<TrackerPage> {
 
   Future<http.Response> _post(Map<String, dynamic> body) => http.post(
     Uri.parse(control('script_url').text.trim()),
-    headers: {'Content-Type': 'application/json'},
+    // text/plain avoids CORS preflight on web; Apps Script reads the body regardless
+    headers: {'Content-Type': kIsWeb ? 'text/plain' : 'application/json'},
     body: jsonEncode(body),
   );
   Future<void> _checkBirthdays() async {
