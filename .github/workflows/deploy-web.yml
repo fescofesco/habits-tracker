@@ -32,7 +32,9 @@ jobs:
         run: flutter pub get
 
       - name: Build Flutter web
-        run: flutter build web --base-href "/habits-tracker/"
+        run: |
+          flutter build web --base-href "/habits-tracker/"
+          touch build/web/.nojekyll
 
       - name: Publish gh-pages branch
         working-directory: flutter_app/build/web
