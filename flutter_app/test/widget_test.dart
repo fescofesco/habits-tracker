@@ -14,7 +14,7 @@ void main() {
   testWidgets('Tracker starts', (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const HabitsApp());
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
     expect(find.text('Choose your tracker'), findsOneWidget);
   });
 }

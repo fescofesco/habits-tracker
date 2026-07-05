@@ -1,40 +1,82 @@
 const SPREADSHEET_ID = '1wm2F_TyIyqgwMdyK1z63AqZDnAhXlGZUeYkMEBD5iQo';
 
+const HEADERS = [
+  'timestamp','date','person','reading','eat_before_19','up_before_8','phone_off_22','pushups_10',
+  'stranger_conversation','got_her_number','call_close_one','birthday_message_sent','birthday_called_instead',
+  'cleaned_kitchen','cleaned_table','cleaned_floor','stranger_comment','birthday_comment','housework','stretching',
+  'walking','journaling','courage','courage_comment','board_game','board_game_comment','sports','sports_comment',
+  'contact_oma','contact_mama','contact_ambi','no_porn','shaved','lights_off_2245','close_one_comment',
+  'birthday_done','uncle_exercise','uncle_call_meet_loved_one','uncle_exercise_comment'
+];
+
+const HABIT_KEYS = [
+  'reading','eat_before_19','up_before_8','phone_off_22','pushups_10','stranger_conversation','got_her_number',
+  'call_close_one','birthday_message_sent','birthday_called_instead','cleaned_kitchen','cleaned_table','cleaned_floor',
+  'housework','stretching','walking','journaling','courage','board_game','sports','contact_oma','contact_mama',
+  'contact_ambi','no_porn','shaved','lights_off_2245','uncle_exercise','uncle_call_meet_loved_one'
+];
+
+const COMMENT_KEYS = [
+  'stranger_comment','birthday_comment','courage_comment','board_game_comment','sports_comment',
+  'close_one_comment','uncle_exercise_comment'
+];
+
 function doPost(e) {
-  const payload = JSON.parse(e.postData.contents || '{}');
-  if (payload.action === 'saveDay') return json(saveDay(payload));
-  if (payload.action === 'getBirthdays') return json(getBirthdays(payload.date));
-  return json({ ok: false, error: 'Unknown action' });
+  try {
+    const payload = JSON.parse((e.postData && e.postData.contents) || '{}');
+    if (payload.action === 'saveDay') return json(saveDay(payload));
+    if (payload.action === 'getDay') return json(getDay(payload.date, payload.person));
+    if (payload.action === 'getBirthdays') return json(getBirthdays(payload.date));
+    return json({ ok: false, error: 'Unknown action' });
+  } catch (error) {
+    return json({ ok: false, error: String(error && error.message || error) });
+  }
 }
 
 function saveDay(payload) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sheet = getOrCreateSheet_(ss, 'daily_log', [
-    'timestamp','date','person','reading','eat_before_19','up_before_8','phone_off_22','pushups_10',
-    'stranger_conversation','got_her_number','call_close_one','birthday_message_sent','birthday_called_instead',
-    'cleaned_kitchen','cleaned_table','cleaned_floor',
-    'stranger_comment','birthday_comment','housework','stretching','walking','journaling','courage','courage_comment',
-    'board_game','board_game_comment','sports','sports_comment',
-    'contact_oma','contact_mama','contact_ambi','no_porn','shaved','lights_off_2245',
-    'close_one_comment','birthday_done','uncle_exercise','uncle_call_meet_loved_one','uncle_exercise_comment'
-  ]);
-  const h = payload.habits || {};
-  sheet.appendRow([
-    new Date(), payload.date || '', payload.person || '', h.reading || 0, h.eat_before_19 || false, h.up_before_8 || false,
-    h.phone_off_22 || false, h.pushups_10 || 0, h.stranger_conversation || 0, h.got_her_number || 0,
-    h.call_close_one || false, h.birthday_message_sent || false, h.birthday_called_instead || false,
-    h.cleaned_kitchen || false, h.cleaned_table || false, h.cleaned_floor || false,
-    payload.stranger_comment || '', payload.birthday_comment || '',
-    h.housework || 0, h.stretching || 0, h.walking || 0, h.journaling || false, h.courage || false,
-    payload.courage_comment || '', h.board_game || false, payload.board_game_comment || '',
-    h.sports || false, payload.sports_comment || '',
-    h.contact_oma || false, h.contact_mama || false, h.contact_ambi || false,
-    h.no_porn || false, h.shaved || false, h.lights_off_2245 || false,
-    payload.close_one_comment || '', payload.birthday_done || false,
-    h.uncle_exercise || false, h.uncle_call_meet_loved_one || false,
-    payload.uncle_exercise_comment || ''
-  ]);
-  return { ok: true };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getOrCreateSheet_();
+    const h = payload.habits || {};
+    const values = HEADERS.map(header => {
+      if (header === 'timestamp') return new Date();
+      if (header === 'date') return payload.date || '';
+      if (header === 'person') return payload.person || 'Felix';
+      if (HABIT_KEYS.includes(header)) return h[header] ?? false;
+      if (COMMENT_KEYS.includes(header)) return payload[header] || '';
+      if (header === 'birthday_done') return payload.birthday_done || false;
+      return '';
+    });
+    const row = findDayRow_(sheet, payload.date, payload.person || 'Felix');
+    if (row) sheet.getRange(row, 1, 1, HEADERS.length).setValues([values]);
+    else sheet.appendRow(values);
+    return { ok: true, updated: Boolean(row) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getDay(date, person) {
+  const sheet = getOrCreateSheet_();
+  const row = findDayRow_(sheet, date, person || 'Felix');
+  if (!row) return { ok: true, found: false, date: date, person: person || 'Felix' };
+  const values = sheet.getRange(row, 1, 1, HEADERS.length).getValues()[0];
+  const data = { ok: true, found: true, habits: {} };
+  HEADERS.forEach((header, index) => {
+    if (HABIT_KEYS.includes(header)) data.habits[header] = values[index];
+    else if (header !== 'timestamp') data[header] = values[index];
+  });
+  return data;
+}
+
+function findDayRow_(sheet, date, person) {
+  if (!date || sheet.getLastRow() < 2) return 0;
+  const rows = sheet.getRange(2, 2, sheet.getLastRow() - 1, 2).getDisplayValues();
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i][0] === String(date) && rows[i][1] === String(person)) return i + 2;
+  }
+  return 0;
 }
 
 function getBirthdays(dateString) {
@@ -44,27 +86,26 @@ function getBirthdays(dateString) {
   calendars.forEach(cal => {
     const name = cal.getName();
     const maybeBirthdayCalendar = /birthday|geburtstag/i.test(name);
-    const events = cal.getEventsForDay(date);
-    events.forEach(ev => {
+    cal.getEventsForDay(date).forEach(ev => {
       const title = ev.getTitle();
-      if (maybeBirthdayCalendar || /birthday|geburtstag/i.test(title)) {
-        results.push({ calendar: name, title: title });
-      }
+      if (maybeBirthdayCalendar || /birthday|geburtstag/i.test(title)) results.push({ calendar: name, title: title });
     });
   });
-  if (results.length === 0) return { ok: true, date: dateString, birthdays: [], message: 'No birthdays found today.' };
-  return { ok: true, date: dateString, birthdays: results, message: results.map(r => r.title).join('\n') };
+  return {
+    ok: true,
+    date: dateString,
+    birthdays: results,
+    message: results.length ? results.map(r => r.title).join('\n') : 'No birthdays found today.'
+  };
 }
 
-function getOrCreateSheet_(ss, name, headers) {
-  let sh = ss.getSheetByName(name);
-  if (!sh) {
-    sh = ss.insertSheet(name);
-    sh.appendRow(headers);
-  } else if (sh.getLastColumn() < headers.length) {
-    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
-  }
-  return sh;
+function getOrCreateSheet_() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sheet = ss.getSheetByName('daily_log');
+  if (!sheet) sheet = ss.insertSheet('daily_log');
+  if (sheet.getLastRow() === 0) sheet.appendRow(HEADERS);
+  else if (sheet.getLastColumn() < HEADERS.length) sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+  return sheet;
 }
 
 function json(obj) {

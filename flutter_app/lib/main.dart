@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
@@ -15,6 +17,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 const defaultScriptUrl =
     'https://script.google.com/macros/s/AKfycby1swd2M1TqpzPSDcCV4aV-rXqDXZ0G3nS8V4lN0YqLGCSSUI00bh1tqUML_NjD9aox/exec';
+const pendingSyncKey = 'pending_sync_v1';
 
 const habits = <String, String>{
   'eat_before_19': 'Eating before 19:00',
@@ -56,6 +59,7 @@ const periodic = <String, (String, int)>{
 };
 
 final notifications = FlutterLocalNotificationsPlugin();
+const communicationChannel = MethodChannel('habits_tracker/communication');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -155,7 +159,7 @@ class _TrackerPageState extends State<TrackerPage> {
     ]) {
       control(key).text = p.getString('$today:$key') ?? '';
     }
-    control('script_url').text = p.getString('script_url') ?? defaultScriptUrl;
+    await p.remove('script_url');
     birthdayDone = p.getBool('$today:birthday_done') ?? false;
     try {
       books = (jsonDecode(p.getString('finished_books') ?? '[]') as List)
@@ -165,10 +169,25 @@ class _TrackerPageState extends State<TrackerPage> {
     } catch (_) {}
     await _scheduleReminders();
     if (mounted) setState(() {});
+    if (!kIsWeb) {
+      unawaited(_syncCommunicationHistory().then((_) => _scheduleReminders()));
+    }
+    if (appMode != null) {
+      try {
+        await _flushPending();
+        await _pullDay();
+      } catch (_) {
+        if (mounted) {
+          setState(
+            () => status = 'Offline — changes stay safely on this device.',
+          );
+        }
+      }
+    }
     await _checkBirthdays();
   }
 
-  Future<void> _save() async {
+  Future<void> _save({bool queue = true}) async {
     final p = prefs;
     if (p == null) return;
     for (final e in checks.entries) {
@@ -177,11 +196,29 @@ class _TrackerPageState extends State<TrackerPage> {
     for (final e in counts.entries) {
       await p.setInt('$today:${e.key}', e.value);
     }
-    for (final e in controllers.entries.where((e) => e.key != 'script_url')) {
+    for (final e in controllers.entries) {
       await p.setString('$today:${e.key}', e.value.text);
     }
-    await p.setString('script_url', control('script_url').text.trim());
     await p.setBool('$today:birthday_done', birthdayDone);
+    if (queue) await _queueCurrentDay();
+  }
+
+  Future<void> _syncCommunicationHistory() async {
+    if (kIsWeb || prefs == null) return;
+    try {
+      final result = await communicationChannel
+          .invokeMapMethod<String, dynamic>('scan');
+      for (final entry
+          in result?.entries ?? const <MapEntry<String, dynamic>>[]) {
+        final timestamp = (entry.value as num?)?.toInt() ?? 0;
+        final previous = prefs!.getInt('last_done:${entry.key}') ?? 0;
+        if (timestamp > previous) {
+          await prefs!.setInt('last_done:${entry.key}', timestamp);
+        }
+      }
+    } catch (_) {
+      // Communication history integration is Android-only and optional.
+    }
   }
 
   (int, int) _streaks() {
@@ -229,21 +266,38 @@ class _TrackerPageState extends State<TrackerPage> {
     await prefs!.setString('app_mode', mode);
     setState(() => appMode = mode);
     await _scheduleReminders();
+    try {
+      await _flushPending();
+      await _pullDay();
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => status = 'Offline — changes stay safely on this device.',
+        );
+      }
+    }
   }
 
-  Future<http.Response> _post(Map<String, dynamic> body) => http.post(
-    Uri.parse(control('script_url').text.trim()),
-    // text/plain avoids CORS preflight on web; Apps Script reads the body regardless
-    headers: {'Content-Type': kIsWeb ? 'text/plain' : 'application/json'},
-    body: jsonEncode(body),
-  );
+  Future<Map<String, dynamic>> _post(Map<String, dynamic> body) async {
+    final response = await http
+        .post(
+          Uri.parse(defaultScriptUrl),
+          // text/plain avoids a browser CORS preflight; Apps Script still reads JSON.
+          headers: {'Content-Type': kIsWeb ? 'text/plain' : 'application/json'},
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Server returned HTTP ${response.statusCode}');
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (data['ok'] != true) throw Exception(data['error'] ?? 'Sync rejected');
+    return data;
+  }
+
   Future<void> _checkBirthdays() async {
     try {
-      final data =
-          jsonDecode(
-                (await _post({'action': 'getBirthdays', 'date': today})).body,
-              )
-              as Map<String, dynamic>;
+      final data = await _post({'action': 'getBirthdays', 'date': today});
       final found = (data['birthdays'] as List?) ?? [];
       if (mounted) {
         setState(() {
@@ -273,13 +327,91 @@ class _TrackerPageState extends State<TrackerPage> {
       key: control(key).text,
     'birthday_done': birthdayDone,
   };
+
+  String get _person => appMode == 'uncle' ? 'Uncle' : 'Felix';
+
+  Future<void> _queueCurrentDay() async {
+    final p = prefs;
+    if (p == null || appMode == null) return;
+    final pending = _readPending(p);
+    pending['$_person:$today'] = _dailyJson();
+    await p.setString(pendingSyncKey, jsonEncode(pending));
+  }
+
+  Map<String, dynamic> _readPending(SharedPreferences p) {
+    try {
+      return Map<String, dynamic>.from(
+        jsonDecode(p.getString(pendingSyncKey) ?? '{}') as Map,
+      );
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<int> _flushPending() async {
+    final p = prefs;
+    if (p == null) return 0;
+    final pending = _readPending(p);
+    var synced = 0;
+    for (final key in pending.keys.toList()) {
+      await _post(Map<String, dynamic>.from(pending[key] as Map));
+      pending.remove(key);
+      synced++;
+      await p.setString(pendingSyncKey, jsonEncode(pending));
+    }
+    return synced;
+  }
+
+  Future<void> _pullDay() async {
+    final data = await _post({
+      'action': 'getDay',
+      'date': today,
+      'person': _person,
+    });
+    if (data['found'] != true) return;
+    final remoteHabits = Map<String, dynamic>.from(
+      data['habits'] as Map? ?? {},
+    );
+    for (final key in activeHabits.keys) {
+      if (remoteHabits.containsKey(key)) {
+        checks[key] = remoteHabits[key] == true;
+      }
+    }
+    if (appMode != 'uncle') {
+      for (final key in repeatable.keys) {
+        final value = remoteHabits[key];
+        if (value is num) counts[key] = value.toInt();
+      }
+    }
+    for (final key in [
+      'close_one_comment',
+      'stranger_comment',
+      'courage_comment',
+      'board_game_comment',
+      'sports_comment',
+      'birthday_comment',
+      'uncle_exercise_comment',
+    ]) {
+      if (data.containsKey(key)) {
+        control(key).text = data[key]?.toString() ?? '';
+      }
+    }
+    birthdayDone = data['birthday_done'] == true;
+    await _save(queue: false);
+    if (mounted) setState(() {});
+  }
+
   Future<void> _sync() async {
     await _save();
     try {
-      await _post(_dailyJson());
-      setState(() => status = 'Synced to Google Sheets.');
+      final count = await _flushPending();
+      await _pullDay();
+      setState(
+        () => status =
+            'Synced $count offline ${count == 1 ? 'change' : 'changes'} with Google Sheets.',
+      );
     } catch (e) {
-      setState(() => status = 'Sync failed: $e');
+      setState(() => status = 'Offline — saved here and queued for sync. ($e)');
     }
   }
 
@@ -546,7 +678,10 @@ class _TrackerPageState extends State<TrackerPage> {
                       contentPadding: EdgeInsets.zero,
                       dense: true,
                       visualDensity: VisualDensity.compact,
-                      title: Text(e.value, style: const TextStyle(fontSize: 15)),
+                      title: Text(
+                        e.value,
+                        style: const TextStyle(fontSize: 15),
+                      ),
                       subtitle: periodic[e.key] == null
                           ? null
                           : Text(
@@ -566,7 +701,11 @@ class _TrackerPageState extends State<TrackerPage> {
                       },
                     ),
                     if (e.key == 'uncle_exercise')
-                      _note('uncle_exercise_comment', 'What exercise did you do?', speechButton: true),
+                      _note(
+                        'uncle_exercise_comment',
+                        'What exercise did you do?',
+                        speechButton: true,
+                      ),
                     if (e.key == 'call_close_one')
                       _note('close_one_comment', 'Who did you call or meet?'),
                     if (e.key == 'courage')
@@ -626,7 +765,10 @@ class _TrackerPageState extends State<TrackerPage> {
                     contentPadding: EdgeInsets.zero,
                     dense: true,
                     visualDensity: VisualDensity.compact,
-                    title: const Text('Birthday greeting done', style: TextStyle(fontSize: 15)),
+                    title: const Text(
+                      'Birthday greeting done',
+                      style: TextStyle(fontSize: 15),
+                    ),
                     value: birthdayDone,
                     onChanged: (v) {
                       setState(() => birthdayDone = v ?? false);
@@ -661,14 +803,19 @@ class _TrackerPageState extends State<TrackerPage> {
                     label: const Text('Photograph a finished book'),
                   ),
                 const _Heading('Sync + reminders'),
-                TextField(
-                  controller: control('script_url'),
-                  onChanged: (_) => _save(),
-                  decoration: const InputDecoration(
-                    labelText: 'Google Apps Script URL',
-                  ),
+                const Text(
+                  'Works offline. Changes sync with Google Sheets when a connection is available.',
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
+                if (!kIsWeb)
+                  OutlinedButton.icon(
+                    onPressed: () => communicationChannel.invokeMethod<void>(
+                      'openNotificationSettings',
+                    ),
+                    icon: const Icon(Icons.notifications_active),
+                    label: const Text('WhatsApp notification access'),
+                  ),
+                if (!kIsWeb) const SizedBox(height: 8),
                 FilledButton.icon(
                   onPressed: _sync,
                   icon: const Icon(Icons.sync),
