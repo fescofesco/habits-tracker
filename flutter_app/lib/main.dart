@@ -34,6 +34,7 @@ const habits = <String, String>{
   'no_porn': 'No Prn',
   'shaved': 'Shaved',
   'lights_off_2245': 'Bedtime: lights off by 22:45',
+  'oleovit_allergy': 'Oleovit / allergy medication',
   'cleaned_kitchen': 'Cleaned kitchen',
   'cleaned_table': 'Cleaned table',
   'cleaned_floor': 'Cleaned floor',
@@ -111,6 +112,7 @@ class _TrackerPageState extends State<TrackerPage> {
   bool birthdayDone = false;
   String status = '';
   List<Map<String, dynamic>> books = [];
+  List<Map<String, dynamic>> delegatedTasks = [];
 
   @override
   void initState() {
@@ -139,10 +141,45 @@ class _TrackerPageState extends State<TrackerPage> {
         DateTime.now().millisecondsSinceEpoch,
       );
     }
-    for (final key in habits.keys) {
-      checks[key] = p.getBool('$today:$key') ?? false;
+    _loadDayFromPrefs();
+    await p.remove('script_url');
+    try {
+      books = (jsonDecode(p.getString('finished_books') ?? '[]') as List)
+          .cast<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (_) {}
+    _loadTasksFromPrefs();
+    for (final task in delegatedTasks.where(
+      (task) => task['completed'] != true,
+    )) {
+      unawaited(_scheduleDelegatedReminder(task));
     }
-    for (final key in uncleHabits.keys) {
+    await _scheduleReminders();
+    if (mounted) setState(() {});
+    if (!kIsWeb) {
+      unawaited(_syncCommunicationHistory().then((_) => _scheduleReminders()));
+    }
+    if (appMode != null) {
+      try {
+        await _flushPending();
+        await _pullDay();
+        if (appMode != 'uncle') await _pullTasks();
+      } catch (_) {
+        if (mounted) {
+          setState(
+            () => status = 'Offline — changes stay safely on this device.',
+          );
+        }
+      }
+    }
+    await _checkBirthdays();
+  }
+
+  void _loadDayFromPrefs() {
+    final p = prefs;
+    if (p == null) return;
+    for (final key in [...habits.keys, ...uncleHabits.keys]) {
       checks[key] = p.getBool('$today:$key') ?? false;
     }
     for (final key in repeatable.keys) {
@@ -159,32 +196,20 @@ class _TrackerPageState extends State<TrackerPage> {
     ]) {
       control(key).text = p.getString('$today:$key') ?? '';
     }
-    await p.remove('script_url');
     birthdayDone = p.getBool('$today:birthday_done') ?? false;
+  }
+
+  void _loadTasksFromPrefs() {
     try {
-      books = (jsonDecode(p.getString('finished_books') ?? '[]') as List)
-          .cast<Map>()
-          .map((e) => Map<String, dynamic>.from(e))
-          .toList();
-    } catch (_) {}
-    await _scheduleReminders();
-    if (mounted) setState(() {});
-    if (!kIsWeb) {
-      unawaited(_syncCommunicationHistory().then((_) => _scheduleReminders()));
+      delegatedTasks =
+          (jsonDecode(prefs?.getString('delegated_tasks:Felix') ?? '[]')
+                  as List)
+              .cast<Map>()
+              .map((task) => Map<String, dynamic>.from(task))
+              .toList();
+    } catch (_) {
+      delegatedTasks = [];
     }
-    if (appMode != null) {
-      try {
-        await _flushPending();
-        await _pullDay();
-      } catch (_) {
-        if (mounted) {
-          setState(
-            () => status = 'Offline — changes stay safely on this device.',
-          );
-        }
-      }
-    }
-    await _checkBirthdays();
   }
 
   Future<void> _save({bool queue = true}) async {
@@ -269,6 +294,7 @@ class _TrackerPageState extends State<TrackerPage> {
     try {
       await _flushPending();
       await _pullDay();
+      if (mode != 'uncle') await _pullTasks();
     } catch (_) {
       if (mounted) {
         setState(
@@ -276,6 +302,27 @@ class _TrackerPageState extends State<TrackerPage> {
         );
       }
     }
+  }
+
+  bool get _showingToday =>
+      today == DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+  Future<void> _switchDay({required bool yesterday}) async {
+    await _save();
+    final date = DateTime.now().subtract(Duration(days: yesterday ? 1 : 0));
+    today = DateFormat('yyyy-MM-dd').format(date);
+    birthdayVisible = false;
+    _loadDayFromPrefs();
+    if (mounted) setState(() {});
+    try {
+      await _flushPending();
+      await _pullDay();
+    } catch (_) {
+      if (mounted) {
+        setState(() => status = 'Offline — editing $today locally.');
+      }
+    }
+    await _checkBirthdays();
   }
 
   Future<Map<String, dynamic>> _post(Map<String, dynamic> body) async {
@@ -335,6 +382,22 @@ class _TrackerPageState extends State<TrackerPage> {
     if (p == null || appMode == null) return;
     final pending = _readPending(p);
     pending['$_person:$today'] = _dailyJson();
+    await p.setString(pendingSyncKey, jsonEncode(pending));
+  }
+
+  Future<void> _saveTasks({bool queue = true}) async {
+    final p = prefs;
+    if (p == null) return;
+    await p.setString('delegated_tasks:Felix', jsonEncode(delegatedTasks));
+    if (!queue) return;
+    final pending = _readPending(p);
+    pending['tasks:Felix'] = {
+      'action': 'saveTasks',
+      'person': 'Felix',
+      'tasks': delegatedTasks
+          .map((task) => Map<String, dynamic>.from(task)..remove('photoBase64'))
+          .toList(),
+    };
     await p.setString(pendingSyncKey, jsonEncode(pending));
   }
 
@@ -401,11 +464,30 @@ class _TrackerPageState extends State<TrackerPage> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _pullTasks() async {
+    final data = await _post({'action': 'getTasks', 'person': 'Felix'});
+    if (data['found'] != true) return;
+    final localById = {
+      for (final task in delegatedTasks) task['id'].toString(): task,
+    };
+    delegatedTasks = (data['tasks'] as List? ?? const []).cast<Map>().map((
+      raw,
+    ) {
+      final remote = Map<String, dynamic>.from(raw);
+      final photo = localById[remote['id'].toString()]?['photoBase64'];
+      if (photo != null) remote['photoBase64'] = photo;
+      return remote;
+    }).toList();
+    await _saveTasks(queue: false);
+    if (mounted) setState(() {});
+  }
+
   Future<void> _sync() async {
     await _save();
     try {
       final count = await _flushPending();
       await _pullDay();
+      if (appMode != 'uncle') await _pullTasks();
       setState(
         () => status =
             'Synced $count offline ${count == 1 ? 'change' : 'changes'} with Google Sheets.',
@@ -489,6 +571,138 @@ class _TrackerPageState extends State<TrackerPage> {
       });
       await prefs!.setString('finished_books', jsonEncode(books));
       setState(() {});
+    }
+  }
+
+  int _taskNotificationId(Map<String, dynamic> task) =>
+      20000 + ((task['id'] as num?)?.toInt() ?? 0) % 1000000000;
+
+  Future<void> _scheduleDelegatedReminder(Map<String, dynamic> task) async {
+    if (kIsWeb || task['completed'] == true) return;
+    final dueMillis = (task['due'] as num?)?.toInt();
+    if (dueMillis == null) return;
+    final due = DateTime.fromMillisecondsSinceEpoch(dueMillis);
+    if (!due.isAfter(DateTime.now())) return;
+    try {
+      await notifications.zonedSchedule(
+        id: _taskNotificationId(task),
+        title: 'Delegated task is due',
+        body: task['name']?.toString() ?? 'Open Habits Tracker',
+        scheduledDate: tz.TZDateTime.from(due, tz.local),
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'delegated_tasks',
+            'Delegated tasks',
+            importance: Importance.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+        ),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _addDelegatedTask() async {
+    final photo = await ImagePicker().pickImage(
+      source: ImageSource.camera,
+      imageQuality: 70,
+      maxWidth: 1280,
+    );
+    if (photo == null || !mounted) return;
+
+    final name = TextEditingController();
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delegate to yourself for later'),
+        content: TextField(
+          controller: name,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Task name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Choose reminder'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true || name.text.trim().isEmpty || !mounted) return;
+
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: DateTime(now.year + 5),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
+    );
+    if (time == null) return;
+
+    final due = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time.hour,
+      time.minute,
+    );
+    final task = <String, dynamic>{
+      'id': DateTime.now().millisecondsSinceEpoch,
+      'name': name.text.trim(),
+      'created': DateTime.now().millisecondsSinceEpoch,
+      'due': due.millisecondsSinceEpoch,
+      'completed': false,
+      'photoBase64': base64Encode(await photo.readAsBytes()),
+    };
+    delegatedTasks.add(task);
+    await _saveTasks();
+    await _scheduleDelegatedReminder(task);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _setTaskCompleted(
+    Map<String, dynamic> task,
+    bool completed,
+  ) async {
+    task['completed'] = completed;
+    task['completedAt'] = completed
+        ? DateTime.now().millisecondsSinceEpoch
+        : null;
+    if (completed) {
+      await notifications.cancel(id: _taskNotificationId(task));
+    } else {
+      await _scheduleDelegatedReminder(task);
+    }
+    await _saveTasks();
+    if (mounted) setState(() {});
+  }
+
+  Widget _taskPhoto(Map<String, dynamic> task) {
+    try {
+      final encoded = task['photoBase64']?.toString();
+      if (encoded == null || encoded.isEmpty) {
+        return const Icon(Icons.image_not_supported);
+      }
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.memory(
+          base64Decode(encoded),
+          width: 64,
+          height: 64,
+          fit: BoxFit.cover,
+        ),
+      );
+    } catch (_) {
+      return const Icon(Icons.image_not_supported);
     }
   }
 
@@ -648,9 +862,22 @@ class _TrackerPageState extends State<TrackerPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                Text(
-                  '$today · quick mode',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Today'),
+                      selected: _showingToday,
+                      onSelected: (_) => _switchDay(yesterday: false),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Yesterday'),
+                      selected: !_showingToday,
+                      onSelected: (_) => _switchDay(yesterday: true),
+                    ),
+                    Text(today, style: Theme.of(context).textTheme.bodyMedium),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 Container(
@@ -782,6 +1009,42 @@ class _TrackerPageState extends State<TrackerPage> {
                       speechButton: true,
                     ),
                 ],
+                if (appMode != 'uncle')
+                  const _Heading('Delegate to yourself for later'),
+                if (appMode != 'uncle')
+                  ...delegatedTasks.map((task) {
+                    final due = DateTime.fromMillisecondsSinceEpoch(
+                      (task['due'] as num?)?.toInt() ?? 0,
+                    );
+                    final completed = task['completed'] == true;
+                    return Card(
+                      child: ListTile(
+                        leading: _taskPhoto(task),
+                        title: Text(
+                          task['name']?.toString() ?? 'Task',
+                          style: TextStyle(
+                            decoration: completed
+                                ? TextDecoration.lineThrough
+                                : null,
+                          ),
+                        ),
+                        subtitle: Text(
+                          'Reminder: ${DateFormat('yyyy-MM-dd HH:mm').format(due)}',
+                        ),
+                        trailing: Checkbox(
+                          value: completed,
+                          onChanged: (value) =>
+                              _setTaskCompleted(task, value ?? false),
+                        ),
+                      ),
+                    );
+                  }),
+                if (appMode != 'uncle')
+                  FilledButton.icon(
+                    onPressed: _addDelegatedTask,
+                    icon: const Icon(Icons.add_a_photo),
+                    label: const Text('Photograph and delegate a task'),
+                  ),
                 if (appMode != 'uncle') const _Heading('Finished books'),
                 if (appMode != 'uncle')
                   Text(
@@ -803,6 +1066,8 @@ class _TrackerPageState extends State<TrackerPage> {
                     label: const Text('Photograph a finished book'),
                   ),
                 const _Heading('Sync + reminders'),
+                Text('Google Sheets person: $_person'),
+                const SizedBox(height: 4),
                 const Text(
                   'Works offline. Changes sync with Google Sheets when a connection is available.',
                 ),
