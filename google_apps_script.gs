@@ -7,7 +7,7 @@ const HEADERS = [
   'walking','journaling','courage','courage_comment','board_game','board_game_comment','sports','sports_comment',
   'contact_oma','contact_mama','contact_ambi','no_porn','shaved','lights_off_2245','close_one_comment',
   'birthday_done','uncle_exercise','uncle_call_meet_loved_one','uncle_exercise_comment','oleovit_allergy',
-  'delayed_gratification_bored'
+  'delayed_gratification_bored','voice_training','voice_training_score'
 ];
 
 const HABIT_KEYS = [
@@ -15,7 +15,7 @@ const HABIT_KEYS = [
   'call_close_one','birthday_message_sent','birthday_called_instead','cleaned_kitchen','cleaned_table','cleaned_floor',
   'housework','stretching','walking','journaling','courage','board_game','sports','contact_oma','contact_mama',
   'contact_ambi','no_porn','shaved','lights_off_2245','uncle_exercise','uncle_call_meet_loved_one',
-  'oleovit_allergy','delayed_gratification_bored'
+  'oleovit_allergy','delayed_gratification_bored','voice_training'
 ];
 
 const COMMENT_KEYS = [
@@ -83,6 +83,7 @@ function saveDay(payload) {
       if (HABIT_KEYS.includes(header)) return h[header] ?? false;
       if (COMMENT_KEYS.includes(header)) return payload[header] || '';
       if (header === 'birthday_done') return payload.birthday_done || false;
+      if (header === 'voice_training_score') return payload.voice_training_score ?? '';
       return '';
     });
     const row = findDayRow_(sheet, payload.date, payload.person || 'Felix');
