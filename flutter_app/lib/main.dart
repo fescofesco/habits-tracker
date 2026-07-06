@@ -37,6 +37,7 @@ const habits = <String, String>{
   'oleovit_allergy': 'Oleovit / allergy medication',
   'delayed_gratification_bored':
       'Successfully delayed gratification when bored',
+  'cook_own_meal': 'Cook my own meal',
   'cleaned_kitchen': 'Cleaned kitchen',
   'cleaned_table': 'Cleaned table',
   'cleaned_floor': 'Cleaned floor',

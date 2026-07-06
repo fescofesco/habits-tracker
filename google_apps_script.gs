@@ -7,7 +7,7 @@ const HEADERS = [
   'walking','journaling','courage','courage_comment','board_game','board_game_comment','sports','sports_comment',
   'contact_oma','contact_mama','contact_ambi','no_porn','shaved','lights_off_2245','close_one_comment',
   'birthday_done','uncle_exercise','uncle_call_meet_loved_one','uncle_exercise_comment','oleovit_allergy',
-  'delayed_gratification_bored','voice_training','voice_training_score'
+  'delayed_gratification_bored','voice_training','voice_training_score','cook_own_meal'
 ];
 
 const HABIT_KEYS = [
@@ -15,7 +15,7 @@ const HABIT_KEYS = [
   'call_close_one','birthday_message_sent','birthday_called_instead','cleaned_kitchen','cleaned_table','cleaned_floor',
   'housework','stretching','walking','journaling','courage','board_game','sports','contact_oma','contact_mama',
   'contact_ambi','no_porn','shaved','lights_off_2245','uncle_exercise','uncle_call_meet_loved_one',
-  'oleovit_allergy','delayed_gratification_bored','voice_training'
+  'oleovit_allergy','delayed_gratification_bored','voice_training','cook_own_meal'
 ];
 
 const COMMENT_KEYS = [
