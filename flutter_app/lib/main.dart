@@ -328,7 +328,7 @@ class _TrackerPageState extends State<TrackerPage> {
   }
 
   Future<Map<String, dynamic>> _post(Map<String, dynamic> body) async {
-    final response = await http
+    var response = await http
         .post(
           Uri.parse(defaultScriptUrl),
           // text/plain avoids a browser CORS preflight; Apps Script still reads JSON.
@@ -336,10 +336,25 @@ class _TrackerPageState extends State<TrackerPage> {
           body: jsonEncode(body),
         )
         .timeout(const Duration(seconds: 20));
+    if (!kIsWeb &&
+        const {301, 302, 303, 307, 308}.contains(response.statusCode)) {
+      final location = response.headers['location'];
+      if (location == null || location.isEmpty) {
+        throw Exception('Server redirect had no destination');
+      }
+      response = await http
+          .get(Uri.parse(location))
+          .timeout(const Duration(seconds: 20));
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception('Server returned HTTP ${response.statusCode}');
     }
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    late final Map<String, dynamic> data;
+    try {
+      data = jsonDecode(response.body) as Map<String, dynamic>;
+    } on FormatException {
+      throw Exception('Server returned an invalid response instead of JSON');
+    }
     if (data['ok'] != true) throw Exception(data['error'] ?? 'Sync rejected');
     return data;
   }
