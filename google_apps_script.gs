@@ -7,7 +7,7 @@ const HEADERS = [
   'walking','journaling','courage','courage_comment','board_game','board_game_comment','sports','sports_comment',
   'contact_oma','contact_mama','contact_ambi','no_porn','shaved','lights_off_2245','close_one_comment',
   'birthday_done','uncle_exercise','uncle_call_meet_loved_one','uncle_exercise_comment','oleovit_allergy',
-  'delayed_gratification_bored','voice_training','voice_training_score','cook_own_meal'
+  'delayed_gratification_bored','voice_training','voice_training_score','cook_own_meal','cooking_recipe'
 ];
 
 const HABIT_KEYS = [
@@ -20,7 +20,7 @@ const HABIT_KEYS = [
 
 const COMMENT_KEYS = [
   'stranger_comment','birthday_comment','courage_comment','board_game_comment','sports_comment',
-  'close_one_comment','uncle_exercise_comment'
+  'close_one_comment','uncle_exercise_comment','cooking_recipe'
 ];
 
 function doPost(e) {

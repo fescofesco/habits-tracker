@@ -61,6 +61,8 @@ const periodic = <String, (String, int)>{
   'contact_ambi': ('Contact Ambi', 14),
   'shaved': ('Shaving', 3),
 };
+const cookingRecipeKey = 'cooking_recipe';
+const cookingPhotoKey = 'cooking_photo_base64';
 
 final notifications = FlutterLocalNotificationsPlugin();
 const communicationChannel = MethodChannel('habits_tracker/communication');
@@ -114,6 +116,7 @@ class _TrackerPageState extends State<TrackerPage> {
   bool birthdayVisible = false;
   bool birthdayDone = false;
   String status = '';
+  String? cookingPhotoBase64;
   List<Map<String, dynamic>> books = [];
   List<Map<String, dynamic>> delegatedTasks = [];
 
@@ -153,6 +156,7 @@ class _TrackerPageState extends State<TrackerPage> {
           .toList();
     } catch (_) {}
     _loadTasksFromPrefs();
+    await _pruneCompletedTaskPhotos();
     for (final task in delegatedTasks.where(
       (task) => task['completed'] != true,
     )) {
@@ -196,9 +200,11 @@ class _TrackerPageState extends State<TrackerPage> {
       'sports_comment',
       'birthday_comment',
       'uncle_exercise_comment',
+      cookingRecipeKey,
     ]) {
       control(key).text = p.getString('$today:$key') ?? '';
     }
+    cookingPhotoBase64 = p.getString('$today:$cookingPhotoKey');
     birthdayDone = p.getBool('$today:birthday_done') ?? false;
   }
 
@@ -226,6 +232,12 @@ class _TrackerPageState extends State<TrackerPage> {
     }
     for (final e in controllers.entries) {
       await p.setString('$today:${e.key}', e.value.text);
+    }
+    final cookingPhoto = cookingPhotoBase64;
+    if (cookingPhoto == null || cookingPhoto.isEmpty) {
+      await p.remove('$today:$cookingPhotoKey');
+    } else {
+      await p.setString('$today:$cookingPhotoKey', cookingPhoto);
     }
     await p.setBool('$today:birthday_done', birthdayDone);
     if (queue) await _queueCurrentDay();
@@ -388,6 +400,7 @@ class _TrackerPageState extends State<TrackerPage> {
       'sports_comment',
       'birthday_comment',
       'uncle_exercise_comment',
+      cookingRecipeKey,
     ])
       key: control(key).text,
     'birthday_done': birthdayDone,
@@ -472,6 +485,7 @@ class _TrackerPageState extends State<TrackerPage> {
       'sports_comment',
       'birthday_comment',
       'uncle_exercise_comment',
+      cookingRecipeKey,
     ]) {
       if (data.containsKey(key)) {
         control(key).text = data[key]?.toString() ?? '';
@@ -496,8 +510,36 @@ class _TrackerPageState extends State<TrackerPage> {
       if (photo != null) remote['photoBase64'] = photo;
       return remote;
     }).toList();
+    await _pruneCompletedTaskPhotos();
     await _saveTasks(queue: false);
     if (mounted) setState(() {});
+  }
+
+  DateTime _dayStart(DateTime date) => DateTime(date.year, date.month, date.day);
+
+  DateTime get _selectedDate => DateTime.parse(today);
+
+  int get _selectedDayTimestamp =>
+      _dayStart(_selectedDate).millisecondsSinceEpoch;
+
+  bool _isBeforeToday(int millis) {
+    final date = DateTime.fromMillisecondsSinceEpoch(millis);
+    return _dayStart(date).isBefore(_dayStart(DateTime.now()));
+  }
+
+  Future<void> _pruneCompletedTaskPhotos() async {
+    var changed = false;
+    for (final task in delegatedTasks) {
+      final completedAt = (task['completedAt'] as num?)?.toInt();
+      if (task['completed'] == true &&
+          completedAt != null &&
+          task.containsKey('photoBase64') &&
+          _isBeforeToday(completedAt)) {
+        task.remove('photoBase64');
+        changed = true;
+      }
+    }
+    if (changed) await _saveTasks(queue: false);
   }
 
   Future<void> _sync() async {
@@ -590,6 +632,24 @@ class _TrackerPageState extends State<TrackerPage> {
       await prefs!.setString('finished_books', jsonEncode(books));
       setState(() {});
     }
+  }
+
+  Future<void> _takeCookingPhoto() async {
+    final photo = await ImagePicker().pickImage(
+      source: ImageSource.camera,
+      imageQuality: 70,
+      maxWidth: 1280,
+    );
+    if (photo == null) return;
+    cookingPhotoBase64 = base64Encode(await photo.readAsBytes());
+    await _save();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _removeCookingPhoto() async {
+    cookingPhotoBase64 = null;
+    await _save();
+    if (mounted) setState(() {});
   }
 
   int _taskNotificationId(Map<String, dynamic> task) =>
@@ -692,9 +752,7 @@ class _TrackerPageState extends State<TrackerPage> {
     bool completed,
   ) async {
     task['completed'] = completed;
-    task['completedAt'] = completed
-        ? DateTime.now().millisecondsSinceEpoch
-        : null;
+    task['completedAt'] = completed ? _selectedDayTimestamp : null;
     if (completed) {
       await notifications.cancel(id: _taskNotificationId(task));
     } else {
@@ -722,6 +780,123 @@ class _TrackerPageState extends State<TrackerPage> {
     } catch (_) {
       return const Icon(Icons.image_not_supported);
     }
+  }
+
+  Widget _cookingPhotoPreview() {
+    final encoded = cookingPhotoBase64;
+    if (encoded == null || encoded.isEmpty) {
+      return OutlinedButton.icon(
+        onPressed: _takeCookingPhoto,
+        icon: const Icon(Icons.add_a_photo),
+        label: const Text('Add cooking photo'),
+      );
+    }
+    try {
+      return Padding(
+        padding: const EdgeInsets.only(left: 16, bottom: 8),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.memory(
+                base64Decode(encoded),
+                width: 72,
+                height: 72,
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _takeCookingPhoto,
+                    icon: const Icon(Icons.camera_alt),
+                    label: const Text('Replace photo'),
+                  ),
+                  TextButton.icon(
+                    onPressed: _removeCookingPhoto,
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Remove'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    } catch (_) {
+      return TextButton.icon(
+        onPressed: _removeCookingPhoto,
+        icon: const Icon(Icons.broken_image),
+        label: const Text('Remove broken cooking photo'),
+      );
+    }
+  }
+
+  void _showHabitEvaluation() {
+    final completedHabits = activeHabits.entries
+        .where((entry) => checks[entry.key] == true)
+        .map((entry) => entry.value)
+        .toList();
+    final missedHabits = activeHabits.entries
+        .where((entry) => checks[entry.key] != true)
+        .map((entry) => entry.value)
+        .toList();
+    final repeatableTotal = appMode == 'uncle'
+        ? 0
+        : counts.values.fold<int>(0, (sum, value) => sum + value);
+    final recipe = control(cookingRecipeKey).text.trim();
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Habit evaluation for $today'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Score: $done/$total'),
+              if (appMode != 'uncle')
+                Text('Repeatable actions logged: $repeatableTotal'),
+              if (completedHabits.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  'Done',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(completedHabits.join('\n')),
+              ],
+              if (missedHabits.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  'Open',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(missedHabits.join('\n')),
+              ],
+              if (recipe.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  'Cooking recipe',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(recipe),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _scheduleReminders() async {
@@ -939,7 +1114,7 @@ class _TrackerPageState extends State<TrackerPage> {
                         if (v == true && periodic.containsKey(e.key)) {
                           await prefs!.setInt(
                             'last_done:${e.key}',
-                            DateTime.now().millisecondsSinceEpoch,
+                            _selectedDayTimestamp,
                           );
                         }
                         await _save();
@@ -959,6 +1134,14 @@ class _TrackerPageState extends State<TrackerPage> {
                       _note('board_game_comment', 'Which board game?'),
                     if (e.key == 'sports')
                       _note('sports_comment', 'What sport or exercise?'),
+                    if (e.key == 'cook_own_meal') ...[
+                      _note(
+                        cookingRecipeKey,
+                        'Recipe or cooking notes',
+                        speechButton: true,
+                      ),
+                      _cookingPhotoPreview(),
+                    ],
                   ],
                 ),
                 if (appMode != 'uncle') const _Heading('Repeatable habits'),
@@ -1090,6 +1273,12 @@ class _TrackerPageState extends State<TrackerPage> {
                   'Works offline. Changes sync with Google Sheets when a connection is available.',
                 ),
                 const SizedBox(height: 10),
+                FilledButton.icon(
+                  onPressed: _showHabitEvaluation,
+                  icon: const Icon(Icons.summarize),
+                  label: const Text('Evaluate habits'),
+                ),
+                const SizedBox(height: 8),
                 if (!kIsWeb)
                   OutlinedButton.icon(
                     onPressed: () => communicationChannel.invokeMethod<void>(
