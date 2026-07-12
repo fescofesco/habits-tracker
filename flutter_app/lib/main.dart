@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -63,6 +64,8 @@ const periodic = <String, (String, int)>{
 };
 const cookingRecipeKey = 'cooking_recipe';
 const cookingPhotoKey = 'cooking_photo_base64';
+const recipeSuggestionSourceUrl = 'https://nutritionfacts.org/recipes/';
+const recipeSuggestionKey = 'recipe_suggestion';
 
 final notifications = FlutterLocalNotificationsPlugin();
 const communicationChannel = MethodChannel('habits_tracker/communication');
@@ -117,6 +120,7 @@ class _TrackerPageState extends State<TrackerPage> {
   bool birthdayDone = false;
   String status = '';
   String? cookingPhotoBase64;
+  Map<String, String>? recipeSuggestion;
   List<Map<String, dynamic>> books = [];
   List<Map<String, dynamic>> delegatedTasks = [];
 
@@ -148,6 +152,7 @@ class _TrackerPageState extends State<TrackerPage> {
       );
     }
     _loadDayFromPrefs();
+    _loadRecipeSuggestionFromPrefs();
     await p.remove('script_url');
     try {
       books = (jsonDecode(p.getString('finished_books') ?? '[]') as List)
@@ -181,6 +186,9 @@ class _TrackerPageState extends State<TrackerPage> {
       }
     }
     await _checkBirthdays();
+    if (appMode != 'uncle') {
+      unawaited(_fetchRecipeSuggestion());
+    }
   }
 
   void _loadDayFromPrefs() {
@@ -206,6 +214,19 @@ class _TrackerPageState extends State<TrackerPage> {
     }
     cookingPhotoBase64 = p.getString('$today:$cookingPhotoKey');
     birthdayDone = p.getBool('$today:birthday_done') ?? false;
+  }
+
+  void _loadRecipeSuggestionFromPrefs() {
+    final raw = prefs?.getString('$today:$recipeSuggestionKey');
+    if (raw == null || raw.isEmpty) {
+      recipeSuggestion = null;
+      return;
+    }
+    try {
+      recipeSuggestion = Map<String, String>.from(jsonDecode(raw) as Map);
+    } catch (_) {
+      recipeSuggestion = null;
+    }
   }
 
   void _loadTasksFromPrefs() {
@@ -310,6 +331,7 @@ class _TrackerPageState extends State<TrackerPage> {
       await _flushPending();
       await _pullDay();
       if (mode != 'uncle') await _pullTasks();
+      if (mode != 'uncle') unawaited(_fetchRecipeSuggestion());
     } catch (_) {
       if (mounted) {
         setState(
@@ -328,6 +350,7 @@ class _TrackerPageState extends State<TrackerPage> {
     today = DateFormat('yyyy-MM-dd').format(date);
     birthdayVisible = false;
     _loadDayFromPrefs();
+    _loadRecipeSuggestionFromPrefs();
     if (mounted) setState(() {});
     try {
       await _flushPending();
@@ -338,6 +361,9 @@ class _TrackerPageState extends State<TrackerPage> {
       }
     }
     await _checkBirthdays();
+    if (appMode != 'uncle') {
+      unawaited(_fetchRecipeSuggestion());
+    }
   }
 
   Future<Map<String, dynamic>> _post(Map<String, dynamic> body) async {
@@ -515,7 +541,8 @@ class _TrackerPageState extends State<TrackerPage> {
     if (mounted) setState(() {});
   }
 
-  DateTime _dayStart(DateTime date) => DateTime(date.year, date.month, date.day);
+  DateTime _dayStart(DateTime date) =>
+      DateTime(date.year, date.month, date.day);
 
   DateTime get _selectedDate => DateTime.parse(today);
 
@@ -650,6 +677,57 @@ class _TrackerPageState extends State<TrackerPage> {
     cookingPhotoBase64 = null;
     await _save();
     if (mounted) setState(() {});
+  }
+
+  String _decodeHtml(String value) => value
+      .replaceAll('&amp;', '&')
+      .replaceAll('&#038;', '&')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#039;', "'")
+      .replaceAll('&apos;', "'")
+      .replaceAll('&ndash;', '-')
+      .replaceAll('&mdash;', '-')
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  Future<void> _fetchRecipeSuggestion({bool force = false}) async {
+    final p = prefs;
+    if (p == null) return;
+    if (!force && recipeSuggestion != null) return;
+    try {
+      final response = await http
+          .get(Uri.parse(recipeSuggestionSourceUrl))
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode < 200 || response.statusCode >= 300) return;
+      final matches = RegExp(
+        r'''<a[^>]+href=["'](https://nutritionfacts\.org/recipes/[^"']+)["'][^>]*>(.*?)</a>''',
+        caseSensitive: false,
+        dotAll: true,
+      ).allMatches(response.body);
+      final suggestions = <Map<String, String>>[];
+      for (final match in matches) {
+        final url = match.group(1);
+        final rawTitle = match.group(2);
+        if (url == null || rawTitle == null) continue;
+        final title = _decodeHtml(rawTitle.replaceAll(RegExp(r'<[^>]+>'), ''));
+        if (title.isEmpty || suggestions.any((item) => item['url'] == url)) {
+          continue;
+        }
+        suggestions.add({'title': title, 'url': url});
+      }
+      if (suggestions.isEmpty) return;
+      final daySeed = int.tryParse(today.replaceAll('-', '')) ?? 0;
+      final suggestion = force
+          ? suggestions[Random().nextInt(suggestions.length)]
+          : suggestions[daySeed % suggestions.length];
+      await p.setString('$today:$recipeSuggestionKey', jsonEncode(suggestion));
+      recipeSuggestion = suggestion;
+      if (mounted) setState(() {});
+      unawaited(_scheduleReminders());
+    } catch (_) {
+      // Recipe suggestions are a nice-to-have and should never block tracking.
+    }
   }
 
   int _taskNotificationId(Map<String, dynamic> task) =>
@@ -836,6 +914,40 @@ class _TrackerPageState extends State<TrackerPage> {
     }
   }
 
+  Widget _recipeSuggestionCard() {
+    final suggestion = recipeSuggestion;
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, bottom: 8),
+      child: Card(
+        child: ListTile(
+          leading: const Icon(Icons.restaurant_menu),
+          title: Text(suggestion?['title'] ?? 'Dr. Greger recipe suggestion'),
+          subtitle: Text(
+            suggestion == null
+                ? 'Tap refresh to download today\'s idea.'
+                : suggestion['url'] ?? recipeSuggestionSourceUrl,
+          ),
+          trailing: IconButton(
+            tooltip: 'Refresh suggestion',
+            onPressed: () => _fetchRecipeSuggestion(force: true),
+            icon: const Icon(Icons.refresh),
+          ),
+          onTap: suggestion == null
+              ? () => _fetchRecipeSuggestion(force: true)
+              : () {
+                  final url = suggestion['url'] ?? recipeSuggestionSourceUrl;
+                  Clipboard.setData(ClipboardData(text: url));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Recipe link copied to clipboard'),
+                    ),
+                  );
+                },
+        ),
+      ),
+    );
+  }
+
   void _showHabitEvaluation() {
     final completedHabits = activeHabits.entries
         .where((entry) => checks[entry.key] == true)
@@ -926,7 +1038,7 @@ class _TrackerPageState extends State<TrackerPage> {
         await notifications.zonedSchedule(
           id: item.$3,
           title: 'Habits check-in',
-          body: _overdueText(),
+          body: item.$3 == 1000 ? _morningRecipeText() : _overdueText(),
           scheduledDate: date,
           notificationDetails: const NotificationDetails(
             android: AndroidNotificationDetails(
@@ -966,6 +1078,14 @@ class _TrackerPageState extends State<TrackerPage> {
     return due.isEmpty
         ? 'Open the tracker and give today a little momentum.'
         : due.join(' · ');
+  }
+
+  String _morningRecipeText() {
+    final suggestion = recipeSuggestion;
+    if (suggestion != null && suggestion['title']?.isNotEmpty == true) {
+      return 'Today\'s cooking idea: ${suggestion['title']}';
+    }
+    return 'Open the tracker for today\'s Dr. Greger recipe idea.';
   }
 
   Widget _note(String key, String hint, {bool speechButton = false}) => Padding(
@@ -1140,6 +1260,7 @@ class _TrackerPageState extends State<TrackerPage> {
                         'Recipe or cooking notes',
                         speechButton: true,
                       ),
+                      _recipeSuggestionCard(),
                       _cookingPhotoPreview(),
                     ],
                   ],
