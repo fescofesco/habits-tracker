@@ -161,7 +161,7 @@ class _TrackerPageState extends State<TrackerPage> {
           .toList();
     } catch (_) {}
     _loadTasksFromPrefs();
-    await _pruneCompletedTaskPhotos();
+    await _pruneCompletedTasks();
     for (final task in delegatedTasks.where(
       (task) => task['completed'] != true,
     )) {
@@ -536,7 +536,7 @@ class _TrackerPageState extends State<TrackerPage> {
       if (photo != null) remote['photoBase64'] = photo;
       return remote;
     }).toList();
-    await _pruneCompletedTaskPhotos();
+    await _pruneCompletedTasks();
     await _saveTasks(queue: false);
     if (mounted) setState(() {});
   }
@@ -554,8 +554,29 @@ class _TrackerPageState extends State<TrackerPage> {
     return _dayStart(date).isBefore(_dayStart(DateTime.now()));
   }
 
-  Future<void> _pruneCompletedTaskPhotos() async {
+  bool _completedTaskIsExpired(Map<String, dynamic> task) {
+    if (task['completed'] != true) return false;
+    final completedAt =
+        (task['completedAt'] as num?)?.toInt() ??
+        (task['due'] as num?)?.toInt() ??
+        (task['created'] as num?)?.toInt();
+    if (completedAt == null) return false;
+    final completedDay = _dayStart(
+      DateTime.fromMillisecondsSinceEpoch(completedAt),
+    );
+    final yesterday = _dayStart(
+      DateTime.now().subtract(const Duration(days: 1)),
+    );
+    return completedDay.isBefore(yesterday);
+  }
+
+  Future<void> _pruneCompletedTasks() async {
     var changed = false;
+    final before = delegatedTasks.length;
+    delegatedTasks = delegatedTasks
+        .where((task) => !_completedTaskIsExpired(task))
+        .toList();
+    changed = delegatedTasks.length != before;
     for (final task in delegatedTasks) {
       final completedAt = (task['completedAt'] as num?)?.toInt();
       if (task['completed'] == true &&
@@ -566,7 +587,7 @@ class _TrackerPageState extends State<TrackerPage> {
         changed = true;
       }
     }
-    if (changed) await _saveTasks(queue: false);
+    if (changed) await _saveTasks();
   }
 
   Future<void> _sync() async {
