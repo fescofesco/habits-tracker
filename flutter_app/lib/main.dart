@@ -119,7 +119,7 @@ class _TrackerPageState extends State<TrackerPage> {
   bool birthdayVisible = false;
   bool birthdayDone = false;
   String status = '';
-  String? cookingPhotoBase64;
+  List<String> cookingPhotoBase64s = [];
   Map<String, String>? recipeSuggestion;
   List<Map<String, dynamic>> books = [];
   List<Map<String, dynamic>> delegatedTasks = [];
@@ -212,8 +212,24 @@ class _TrackerPageState extends State<TrackerPage> {
     ]) {
       control(key).text = p.getString('$today:$key') ?? '';
     }
-    cookingPhotoBase64 = p.getString('$today:$cookingPhotoKey');
+    cookingPhotoBase64s = _decodeCookingPhotos(
+      p.getString('$today:$cookingPhotoKey'),
+    );
     birthdayDone = p.getBool('$today:birthday_done') ?? false;
+  }
+
+  List<String> _decodeCookingPhotos(String? raw) {
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        return decoded
+            .map((photo) => photo.toString())
+            .where((photo) => photo.isNotEmpty)
+            .toList();
+      }
+    } catch (_) {}
+    return [raw];
   }
 
   void _loadRecipeSuggestionFromPrefs() {
@@ -254,11 +270,13 @@ class _TrackerPageState extends State<TrackerPage> {
     for (final e in controllers.entries) {
       await p.setString('$today:${e.key}', e.value.text);
     }
-    final cookingPhoto = cookingPhotoBase64;
-    if (cookingPhoto == null || cookingPhoto.isEmpty) {
+    if (cookingPhotoBase64s.isEmpty) {
       await p.remove('$today:$cookingPhotoKey');
     } else {
-      await p.setString('$today:$cookingPhotoKey', cookingPhoto);
+      await p.setString(
+        '$today:$cookingPhotoKey',
+        jsonEncode(cookingPhotoBase64s),
+      );
     }
     await p.setBool('$today:birthday_done', birthdayDone);
     if (queue) await _queueCurrentDay();
@@ -689,13 +707,14 @@ class _TrackerPageState extends State<TrackerPage> {
       maxWidth: 1280,
     );
     if (photo == null) return;
-    cookingPhotoBase64 = base64Encode(await photo.readAsBytes());
+    cookingPhotoBase64s.add(base64Encode(await photo.readAsBytes()));
     await _save();
     if (mounted) setState(() {});
   }
 
-  Future<void> _removeCookingPhoto() async {
-    cookingPhotoBase64 = null;
+  Future<void> _removeCookingPhoto(int index) async {
+    if (index < 0 || index >= cookingPhotoBase64s.length) return;
+    cookingPhotoBase64s.removeAt(index);
     await _save();
     if (mounted) setState(() {});
   }
@@ -882,55 +901,65 @@ class _TrackerPageState extends State<TrackerPage> {
   }
 
   Widget _cookingPhotoPreview() {
-    final encoded = cookingPhotoBase64;
-    if (encoded == null || encoded.isEmpty) {
-      return OutlinedButton.icon(
-        onPressed: _takeCookingPhoto,
-        icon: const Icon(Icons.add_a_photo),
-        label: const Text('Add cooking photo'),
-      );
-    }
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (var index = 0; index < cookingPhotoBase64s.length; index++)
+                _cookingPhotoTile(cookingPhotoBase64s[index], index),
+              OutlinedButton.icon(
+                onPressed: _takeCookingPhoto,
+                icon: const Icon(Icons.add_a_photo),
+                label: Text(
+                  cookingPhotoBase64s.isEmpty
+                      ? 'Add cooking photo'
+                      : 'Add photo',
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cookingPhotoTile(String encoded, int index) {
     try {
-      return Padding(
-        padding: const EdgeInsets.only(left: 16, bottom: 8),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.memory(
-                base64Decode(encoded),
-                width: 72,
-                height: 72,
-                fit: BoxFit.cover,
-              ),
+      return Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.memory(
+              base64Decode(encoded),
+              width: 92,
+              height: 92,
+              fit: BoxFit.cover,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _takeCookingPhoto,
-                    icon: const Icon(Icons.camera_alt),
-                    label: const Text('Replace photo'),
-                  ),
-                  TextButton.icon(
-                    onPressed: _removeCookingPhoto,
-                    icon: const Icon(Icons.delete_outline),
-                    label: const Text('Remove'),
-                  ),
-                ],
+          ),
+          Positioned(
+            top: 2,
+            right: 2,
+            child: IconButton.filledTonal(
+              style: IconButton.styleFrom(
+                minimumSize: const Size.square(30),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
+              onPressed: () => _removeCookingPhoto(index),
+              icon: const Icon(Icons.close, size: 16),
             ),
-          ],
-        ),
+          ),
+        ],
       );
     } catch (_) {
       return TextButton.icon(
-        onPressed: _removeCookingPhoto,
+        onPressed: () => _removeCookingPhoto(index),
         icon: const Icon(Icons.broken_image),
-        label: const Text('Remove broken cooking photo'),
+        label: const Text('Remove broken photo'),
       );
     }
   }
